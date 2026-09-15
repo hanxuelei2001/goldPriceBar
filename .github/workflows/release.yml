@@ -1,0 +1,199 @@
+name: Release
+
+# 打 tag（v*）时自动用 scripts/ 下的脚本构建 macOS DMG 与 Windows 便携包，
+# 并把产物挂到对应的 GitHub Release；也可以在 Actions 页面手动触发。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布使用的 tag（留空则使用当前触发 ref，例如分支名）"
+        required: false
+        type: string
+
+# 默认只读；只有发布 job 需要写权限
+permissions:
+  contents: read
+
+# 同一个 tag 的发布串行执行，避免两个 run 同时创建/覆盖同一份资产
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: macOS DMG
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -n "$latest" ]; then
+            sudo xcode-select -s "$latest"
+          fi
+          echo "xcode-select: $(xcode-select -p)"
+          sw_vers
+          uname -m
+          swift --version
+
+      # Package.swift 使用 swift-tools-version: 6.2，工具链过旧会直接解析 manifest 失败。
+      # 这里提前给出明确报错，而不是让 swift build 抛出难懂的清单错误。
+      - name: Require Swift 6.2+
+        run: |
+          installed="$(swift -version 2>&1 | awk '/Swift version/ {print $4; exit}')"
+          if [ -z "$installed" ]; then
+            echo "::error::无法检测 Swift 版本"
+            exit 1
+          fi
+          echo "Swift: $installed"
+          lowest="$(printf '%s\n%s\n' "6.2" "$installed" | sort -V | head -1)"
+          if [ "$lowest" != "6.2" ]; then
+            echo "::error::需要 Swift 6.2+（swift-tools-version: 6.2），当前为 $installed"
+            exit 1
+          fi
+
+      - name: Build DMG
+        run: bash scripts/build-dmg.sh
+
+      - name: List artifacts
+        run: ls -lh dist
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  windows:
+    name: Windows portable ZIP
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Test and package portable build
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+
+      - name: List artifacts
+        shell: pwsh
+        run: Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # gh 需要仓库上下文；tag 推送时这里检出的就是该 tag 的提交
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Resolve tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          tag="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          if [ -z "$tag" ]; then
+            echo "::error::无法确定 tag"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "发布 tag：$tag"
+
+      - name: Verify assets
+        run: |
+          count="$(find release-assets -type f | wc -l | tr -d ' ')"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::没有下载到任何构建产物"
+            exit 1
+          fi
+          ls -lh release-assets
+
+      # scripts/build-dmg.sh 与 scripts/build-windows.ps1 内部各自写死了版本号，
+      # tag 与脚本版本不一致时不阻断发布，但给出明确告警。
+      - name: Check asset version against tag
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          version="${TAG#v}"
+          for file in release-assets/*; do
+            name="$(basename "$file")"
+            case "$name" in
+              *"$version"*) echo "OK   $name 含版本 $version" ;;
+              *) echo "::warning file=$name::文件名不含 tag 版本 $version，请确认 scripts/ 内的版本号已同步" ;;
+            esac
+          done
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # 形如 v1.0.3-beta.1 的 tag 自动标记为预发布
+          prerelease=""
+          case "$TAG" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，覆盖更新资产"
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            echo "创建 Release $TAG"
+            # --target 只能用于尚不存在的 tag：tag 推送触发时 tag 已存在，
+            # 手动触发且 tag 尚未创建时才把它指向本次构建的提交。
+            target=()
+            if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+              target=(--target "$GITHUB_SHA")
+            fi
+            gh release create "$TAG" release-assets/* \
+              --title "$TAG" \
+              --generate-notes \
+              ${target[@]+"${target[@]}"} \
+              $prerelease
+          fi
+
+      - name: Summarize
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          {
+            echo "## Release $TAG"
+            echo ""
+            echo "| 文件 | 大小 |"
+            echo "|------|------|"
+            for file in release-assets/*; do
+              echo "| \`$(basename "$file")\` | $(du -h "$file" | cut -f1) |"
+            done
+            echo ""
+            echo "Release 页面：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          } >> "$GITHUB_STEP_SUMMARY"
