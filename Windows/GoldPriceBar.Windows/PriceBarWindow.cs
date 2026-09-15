@@ -95,7 +95,8 @@ internal sealed class PriceBarWindow : Window, IDisposable
         priceLabel.Text = snapshot.FormattedPrice;
         var info = snapshot.Price;
         changeLabel.Text = $"({info.ChangeAmount} {info.ChangePercent})";
-        changeLabel.Foreground = UiStyles.TrendBrush(info.IsNegative);
+        priceLabel.Foreground = UiStyles.TrendBrush(snapshot.Trend);
+        changeLabel.Foreground = UiStyles.TrendBrush(snapshot.Trend);
     }
 
     internal void PositionNearTaskbar()

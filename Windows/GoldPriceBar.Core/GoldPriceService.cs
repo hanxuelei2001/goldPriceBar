@@ -28,9 +28,13 @@ public sealed class GoldPriceService
         try
         {
             var json = await client.GetStringAsync(provider.Endpoint(), cancellationToken);
-            return provider == GoldProvider.ZheShang
-                ? ParseZheShang(json)
-                : ParseMinSheng(json);
+            return provider switch
+            {
+                // 浙商与工商同为京东金价行情，仅 goldCode 不同，响应结构一致
+                GoldProvider.ZheShang or GoldProvider.GongShang => ParseJdGoldQuote(json),
+                GoldProvider.MinSheng => ParseMinSheng(json),
+                _ => PriceInfo.Empty,
+            };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -69,9 +73,16 @@ public sealed class GoldPriceService
         }
     }
 
-    public static PriceInfo ParseZheShang(string json)
+    /// <summary>解析浙商积存金（CZB-JCJ）行情。</summary>
+    public static PriceInfo ParseZheShang(string json) => ParseJdGoldQuote(json);
+
+    /// <summary>解析工商积存金（ICBC-JCJ）行情。</summary>
+    public static PriceInfo ParseGongShang(string json) => ParseJdGoldQuote(json);
+
+    /// <summary>京东金价行情通用解析，浙商与工商响应结构一致，仅 goldCode 不同。</summary>
+    private static PriceInfo ParseJdGoldQuote(string json)
     {
-        var response = JsonSerializer.Deserialize<ZheShangResponse>(json, JsonOptions);
+        var response = JsonSerializer.Deserialize<JdGoldQuoteResponse>(json, JsonOptions);
         var node = response?.ResultData?.Data;
         var price = node?.LastPrice ?? 0;
         var raise = node?.Raise ?? 0;
@@ -145,17 +156,17 @@ public sealed class GoldPriceService
             item.RaisePercent ?? 0);
     }
 
-    private sealed class ZheShangResponse
+    private sealed class JdGoldQuoteResponse
     {
-        public ZheShangResultData? ResultData { get; set; }
+        public JdGoldQuoteResultData? ResultData { get; set; }
     }
 
-    private sealed class ZheShangResultData
+    private sealed class JdGoldQuoteResultData
     {
-        public ZheShangData? Data { get; set; }
+        public JdGoldQuoteData? Data { get; set; }
     }
 
-    private sealed class ZheShangData
+    private sealed class JdGoldQuoteData
     {
         public double? LastPrice { get; set; }
         public double? Raise { get; set; }

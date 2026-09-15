@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using GoldPriceBar.Core;
 
 namespace GoldPriceBar.Windows;
 
@@ -18,6 +19,13 @@ internal static class UiStyles
         true => FallBrush,
         false => RiseBrush,
         null => NeutralBrush,
+    };
+
+    internal static Brush TrendBrush(PriceTrendBasis basis) => basis switch
+    {
+        PriceTrendBasis.Rise => RiseBrush,
+        PriceTrendBasis.Fall => FallBrush,
+        _ => NeutralBrush,
     };
 
     internal static TextBlock Label(string text, double size = 12, Brush? brush = null) => new()

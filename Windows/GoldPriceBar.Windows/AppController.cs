@@ -55,6 +55,7 @@ internal sealed class AppController : IDisposable
         };
         hoverPanel.MouseEnter += (_, _) => hoverDismissTimer.Stop();
         hoverPanel.MouseLeave += (_, _) => ScheduleHoverDismiss();
+        character.SingleClickRequested += AdvanceProvider;
         character.PlacementChanged += placement =>
         {
             settings.CharacterLeft = placement.Left;
@@ -79,13 +80,24 @@ internal sealed class AppController : IDisposable
         RebuildMenu();
         priceBar.Update(Snapshot());
         priceBar.Show();
-        character.UpdateQuote("0.00", null);
+        character.UpdateQuote("0.00", PriceTrendBasis.Neutral, settings.Provider.ShortName());
         character.SetCharacterVisible(settings.FloatingCharacterVisible);
         character.SetPowerSaving(NativeMethods.IsBatterySaverEnabled);
         RestartRefreshTimer();
         SystemEvents.SessionSwitch += HandleSessionSwitch;
         SystemEvents.PowerModeChanged += HandlePowerModeChanged;
         _ = RefreshAsync();
+        if (settings.PromptCostPriceOnStartup)
+        {
+            _ = ShowStartupCostPriceDialogAsync();
+        }
+    }
+
+    /// <summary>稍作延迟再弹出成本价设置，先让首次行情显示出来，避免启动即被模态窗口挡住。</summary>
+    private async Task ShowStartupCostPriceDialogAsync()
+    {
+        await Task.Delay(600);
+        if (!disposed) EditCostPrices();
     }
 
     internal void ShowDetails()
@@ -155,7 +167,7 @@ internal sealed class AppController : IDisposable
     {
         var snapshot = Snapshot();
         priceBar.Update(snapshot);
-        character.UpdateQuote(snapshot.FormattedPrice, currentPrice.IsNegative);
+        character.UpdateQuote(snapshot.FormattedPrice, snapshot.Trend, settings.Provider.ShortName());
         trayIcon.Text = TruncateTooltip($"{settings.Provider.DisplayName()} {snapshot.FormattedPrice}");
         if (hoverPanel.IsVisible) hoverPanel.Update(snapshot);
     }
@@ -163,6 +175,7 @@ internal sealed class AppController : IDisposable
     private AppSnapshot Snapshot() => new(
         settings.Provider,
         currentPrice,
+        PriceTrendResolver.Resolve(currentPrice.Price, settings.CostPriceFor(settings.Provider), currentPrice.IsNegative),
         currentMarket,
         lastUpdated,
         settings.RefreshIntervalSeconds,
@@ -218,6 +231,7 @@ internal sealed class AppController : IDisposable
         }
         trayMenu.Items.Add(refresh);
         trayMenu.Items.Add(BuildAlertsMenu());
+        trayMenu.Items.Add(BuildCostMenu());
         trayMenu.Items.Add(new Forms.ToolStripSeparator());
         trayMenu.Items.Add(BuildCharacterMenu());
         trayMenu.Items.Add(new Forms.ToolStripSeparator());
@@ -289,6 +303,41 @@ internal sealed class AppController : IDisposable
         parent.DropDownItems.Add(clear);
     }
 
+    private Forms.ToolStripMenuItem BuildCostMenu()
+    {
+        var cost = new Forms.ToolStripMenuItem("成本价");
+        foreach (var provider in Enum.GetValues<GoldProvider>())
+        {
+            var title = settings.CostPriceFor(provider) is double price
+                ? $"{provider.ShortName()} 成本 {price:F2}"
+                : $"{provider.ShortName()} 成本 未设置";
+            cost.DropDownItems.Add(new Forms.ToolStripMenuItem(title) { Enabled = false });
+        }
+        cost.DropDownItems.Add(new Forms.ToolStripSeparator());
+        var edit = new Forms.ToolStripMenuItem("设置成本价…");
+        edit.Click += (_, _) => EditCostPrices();
+        cost.DropDownItems.Add(edit);
+        var prompt = new Forms.ToolStripMenuItem("启动时提示成本价") { Checked = settings.PromptCostPriceOnStartup };
+        prompt.Click += (_, _) =>
+        {
+            settings.PromptCostPriceOnStartup = !settings.PromptCostPriceOnStartup;
+            RebuildMenu();
+            _ = SaveSettingsAsync();
+        };
+        cost.DropDownItems.Add(prompt);
+        return cost;
+    }
+
+    private void EditCostPrices()
+    {
+        var dialog = new CostPriceDialog(settings);
+        if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
+        settings.CostPrices = result;
+        UpdatePriceSurfaces();
+        RebuildMenu();
+        _ = SaveSettingsAsync();
+    }
+
     private Forms.ToolStripMenuItem BuildCharacterMenu()
     {
         var floating = new Forms.ToolStripMenuItem("浮动窗口");
@@ -336,6 +385,24 @@ internal sealed class AppController : IDisposable
         RebuildMenu();
         await SaveSettingsAsync();
         await RefreshAsync();
+    }
+
+    /// <summary>单击看板娘时按枚举顺序切换到下一个数据源，并返回要显示的提示文案。</summary>
+    private string? AdvanceProvider()
+    {
+        var providers = Enum.GetValues<GoldProvider>();
+        var index = Array.IndexOf(providers, settings.Provider);
+        var next = providers[(index + 1) % providers.Length];
+        settings.Provider = next;
+        currentPrice = PriceInfo.Empty;
+        currentMarket = MarketData.Empty;
+        marketDetector.Reset();
+        alertEvaluator.Reset();
+        UpdatePriceSurfaces();
+        RebuildMenu();
+        _ = SaveSettingsAsync();
+        _ = RefreshAsync();
+        return $"切换到 {next.ShortName()} 啦～";
     }
 
     private void EditAlert(bool high)

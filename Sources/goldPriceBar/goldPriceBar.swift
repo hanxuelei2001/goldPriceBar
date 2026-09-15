@@ -1,9 +1,10 @@
 import AppKit
 import Foundation
 
-enum GoldProvider: CaseIterable {
+enum GoldProvider: String, CaseIterable {
     case zheShang
     case minSheng
+    case gongShang
 
     var displayName: String {
         switch self {
@@ -11,6 +12,8 @@ enum GoldProvider: CaseIterable {
             return "浙商积存金"
         case .minSheng:
             return "民生积存金"
+        case .gongShang:
+            return "工商积存金"
         }
     }
 
@@ -20,6 +23,8 @@ enum GoldProvider: CaseIterable {
             return "浙商"
         case .minSheng:
             return "民生"
+        case .gongShang:
+            return "工银"
         }
     }
 
@@ -29,7 +34,20 @@ enum GoldProvider: CaseIterable {
             return URL(string: "https://api.jdjygold.com/gw2/generic/produTools/h5/m/getGoldPrice?goldCode=CZB-JCJ")!
         case .minSheng:
             return URL(string: "https://ms.jr.jd.com/gw2/generic/CreatorSer/newh5/m/getFirstRelatedProductInfo?reqData=%7B%22circleId%22%3A%2213245%22%2C%22invokeSource%22%3A5%2C%22productId%22%3A%2221001001000001%22%7D")!
+        case .gongShang:
+            return URL(string: "https://api.jdjygold.com/gw2/generic/produTools/h5/m/getGoldPrice?goldCode=ICBC-JCJ")!
         }
+    }
+
+    /// 轮换到下一个数据源（浙商 → 民生 → 工银 → 浙商），用于单击看板娘切换。
+    static func next(after provider: GoldProvider) -> GoldProvider {
+        let providers = allCases
+        guard !providers.isEmpty,
+              let index = providers.firstIndex(of: provider)
+        else {
+            return provider
+        }
+        return providers[(index + 1) % providers.count]
     }
 }
 
@@ -44,7 +62,8 @@ enum RefreshIntervalOption: Double, CaseIterable {
     }
 }
 
-struct ZheShangResponse: Decodable {
+/// 京东金价行情响应，浙商积存金（CZB-JCJ）与工商积存金（ICBC-JCJ）共用该结构。
+struct JdGoldQuoteResponse: Decodable {
     let resultData: ResultData?
 
     struct ResultData: Decodable {
@@ -140,8 +159,9 @@ final class GoldPriceService: Sendable {
         do {
             let (data, _) = try await session.data(for: request)
             switch provider {
-            case .zheShang:
-                return try decodeZheShang(from: data)
+            case .zheShang, .gongShang:
+                // 浙商与工商同为京东金价行情，仅 goldCode 不同，响应结构一致
+                return try decodeJdGoldQuote(from: data)
             case .minSheng:
                 return try decodeMinSheng(from: data)
             }
@@ -212,8 +232,9 @@ final class GoldPriceService: Sendable {
         }
     }
 
-    private func decodeZheShang(from data: Data) throws -> PriceInfo {
-        let response = try JSONDecoder().decode(ZheShangResponse.self, from: data)
+    /// 解析京东金价行情，浙商（CZB-JCJ）与工商（ICBC-JCJ）共用。内部可见以便单元测试。
+    func decodeJdGoldQuote(from data: Data) throws -> PriceInfo {
+        let response = try JSONDecoder().decode(JdGoldQuoteResponse.self, from: data)
         let node = response.resultData?.data
         let price = node?.lastPrice ?? 0
         let raise = node?.raise ?? 0
@@ -282,6 +303,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isMenuOpen = false
     private var isFloatingCharacterVisible = true
     private var floatingCharacterSize: FloatingCharacterSizeOption = .defaultOption
+    private var costPrices: [GoldProvider: Double] = [:]
+    private var promptCostPriceOnStartup = true
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -293,15 +316,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         restartTimer()
         setupHoverTracking()
         floatingCharacterController.setSize(floatingCharacterSize)
-        floatingCharacterController.update(
-            price: format(price: currentPrice),
-            numericPrice: currentPrice,
-            isNegative: currentPriceInfo.isNegative
-        )
+        floatingCharacterController.onSingleClick = { [weak self] in
+            self?.cycleProviderForCharacterClick()
+        }
+        updateFloatingCharacter()
         floatingCharacterController.setVisible(isFloatingCharacterVisible)
         Task {
             await self.refreshPrice()
         }
+        presentStartupCostPriceDialogIfNeeded()
+    }
+
+    /// 启动时按设置询问各数据源的成本价，稍作延迟以便先显示首次行情、不阻塞启动。
+    private func presentStartupCostPriceDialogIfNeeded() {
+        guard promptCostPriceOnStartup else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self else { return }
+            self.editCostPrices()
+        }
+    }
+
+    /// 单击看板娘：切换到下一个数据源，返回新数据源简称用于气泡提示。
+    private func cycleProviderForCharacterClick() -> String? {
+        let next = GoldProvider.next(after: selectedProvider)
+        switchToProvider(next)
+        return next.shortName
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -341,11 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         currentPrice = info.price
         lastUpdateTime = Date()
         updateStatusTitle()
-        floatingCharacterController.update(
-            price: format(price: currentPrice),
-            numericPrice: currentPrice,
-            isNegative: info.isNegative
-        )
+        updateFloatingCharacter()
         checkPriceAlerts()
 
         // Fetch market data in background and update hover panel if visible
@@ -354,6 +389,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if hoverPanel?.isVisible == true {
             updateHoverPanelContent()
         }
+    }
+
+    /// 当前红绿基准：设定了该数据源的成本价时以成本价为准，否则沿用当日涨跌方向。
+    private var currentTrend: GoldPriceTrend {
+        GoldPriceTrend(
+            price: currentPrice,
+            costPrice: costPrices[selectedProvider],
+            isNegative: currentPriceInfo.isNegative
+        )
+    }
+
+    private func updateFloatingCharacter() {
+        floatingCharacterController.update(
+            price: format(price: currentPrice),
+            numericPrice: currentPrice,
+            isNegative: currentPriceInfo.isNegative,
+            costPrice: costPrices[selectedProvider],
+            sourceLabel: selectedProvider.shortName
+        )
     }
 
     private func updateStatusTitle() {
@@ -372,24 +426,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
 
-        // Style entire string with default color
+        // 整条标题统一使用成本价红绿基准，避免同一行出现两种相反颜色。
         attributed.addAttributes([
             .font: font,
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: currentTrend.color,
         ], range: NSRange(location: 0, length: fullStr.count))
-
-        // Color the change part
-        let changeColor: NSColor
-        if let isNeg = info.isNegative {
-            changeColor = isNeg
-                ? NSColor(calibratedRed: 0.2, green: 0.78, blue: 0.35, alpha: 1)  // green
-                : NSColor(calibratedRed: 0.95, green: 0.25, blue: 0.22, alpha: 1) // red
-        } else {
-            changeColor = .secondaryLabelColor
-        }
-
-        let changeRange = (fullStr as NSString).range(of: changePart)
-        attributed.addAttribute(.foregroundColor, value: changeColor, range: changeRange)
 
         button.image = nil
         button.imagePosition = .noImage
@@ -524,6 +565,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        // 成本价：决定红绿基准
+        let costMenuItem = NSMenuItem(title: "成本价", action: nil, keyEquivalent: "")
+        let costSubmenu = NSMenu(title: "成本价")
+        for provider in GoldProvider.allCases {
+            let costText = costPrices[provider].map { format(price: $0) } ?? "未设置"
+            let item = NSMenuItem(
+                title: "\(provider.displayName)：\(costText)",
+                action: nil,
+                keyEquivalent: ""
+            )
+            item.isEnabled = false
+            costSubmenu.addItem(item)
+        }
+        costSubmenu.addItem(.separator())
+
+        let editCostItem = NSMenuItem(
+            title: "设置成本价…",
+            action: #selector(editCostPrices),
+            keyEquivalent: ""
+        )
+        editCostItem.target = self
+        costSubmenu.addItem(editCostItem)
+
+        let promptCostItem = NSMenuItem(
+            title: "启动时提示设置成本价",
+            action: #selector(togglePromptCostPrice),
+            keyEquivalent: ""
+        )
+        promptCostItem.target = self
+        promptCostItem.state = promptCostPriceOnStartup ? .on : .off
+        costSubmenu.addItem(promptCostItem)
+        menu.setSubmenu(costSubmenu, for: costMenuItem)
+        menu.addItem(costMenuItem)
+
+        menu.addItem(.separator())
+
         let floatingWindowItem = NSMenuItem(title: "浮动窗口", action: nil, keyEquivalent: "")
         let floatingWindowSubmenu = NSMenu(title: "浮动窗口")
 
@@ -565,16 +642,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc
     private func selectProvider(_ sender: NSMenuItem) {
         guard let provider = sender.representedObject as? GoldProvider else { return }
+        switchToProvider(provider)
+    }
+
+    /// 切换数据源：菜单与看板娘单击共用同一路径。
+    private func switchToProvider(_ provider: GoldProvider) {
+        guard provider != selectedProvider else { return }
         selectedProvider = provider
         currentPrice = 0
         currentPriceInfo = .empty
         updateStatusTitle()
         floatingCharacterController.resetQuoteHistory()
-        floatingCharacterController.update(
-            price: format(price: currentPrice),
-            numericPrice: currentPrice,
-            isNegative: nil
-        )
+        updateFloatingCharacter()
         rebuildMenu()
         saveSettings()
         Task {
@@ -589,6 +668,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMenu()
         restartTimer()
         saveSettings()
+    }
+
+    @objc
+    private func editCostPrices() {
+        guard let prices = CostPriceDialog.present(current: costPrices) else { return }
+        costPrices = prices
+        CostPriceStore.save(prices)
+        updateStatusTitle()
+        updateFloatingCharacter()
+        rebuildMenu()
+    }
+
+    @objc
+    private func togglePromptCostPrice() {
+        promptCostPriceOnStartup.toggle()
+        saveSettings()
+        rebuildMenu()
     }
 
     @objc
@@ -742,11 +838,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         static let lowThreshold = "lowPriceThreshold"
         static let floatingCharacterVisible = "floatingCharacterVisible"
         static let floatingCharacterSize = "floatingCharacterSize"
+        static let promptCostPriceOnStartup = "promptCostPriceOnStartup"
     }
 
     private func saveSettings() {
         let defaults = UserDefaults.standard
-        defaults.set(selectedProvider == .zheShang ? "zheShang" : "minSheng", forKey: SettingsKey.provider)
+        defaults.set(selectedProvider.rawValue, forKey: SettingsKey.provider)
         defaults.set(refreshInterval.rawValue, forKey: SettingsKey.refreshInterval)
         if let high = highPriceThreshold {
             defaults.set(high, forKey: SettingsKey.highThreshold)
@@ -760,12 +857,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         defaults.set(isFloatingCharacterVisible, forKey: SettingsKey.floatingCharacterVisible)
         defaults.set(floatingCharacterSize.rawValue, forKey: SettingsKey.floatingCharacterSize)
+        defaults.set(promptCostPriceOnStartup, forKey: SettingsKey.promptCostPriceOnStartup)
+        CostPriceStore.save(costPrices)
     }
 
     private func loadSettings() {
         let defaults = UserDefaults.standard
         if let providerStr = defaults.string(forKey: SettingsKey.provider) {
-            selectedProvider = providerStr == "minSheng" ? .minSheng : .zheShang
+            selectedProvider = GoldProvider(rawValue: providerStr) ?? .zheShang
         }
         if let intervalValue = defaults.object(forKey: SettingsKey.refreshInterval) as? Double,
            let interval = RefreshIntervalOption(rawValue: intervalValue) {
@@ -784,6 +883,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
            let size = FloatingCharacterSizeOption(rawValue: rawSize) {
             floatingCharacterSize = size
         }
+        if defaults.object(forKey: SettingsKey.promptCostPriceOnStartup) != nil {
+            promptCostPriceOnStartup = defaults.bool(forKey: SettingsKey.promptCostPriceOnStartup)
+        }
+        costPrices = CostPriceStore.load()
     }
 
     // MARK: - Hover Panel

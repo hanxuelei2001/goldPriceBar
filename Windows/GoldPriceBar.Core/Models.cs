@@ -6,6 +6,7 @@ public enum GoldProvider
 {
     ZheShang,
     MinSheng,
+    GongShang,
 }
 
 public static class GoldProviderExtensions
@@ -14,6 +15,7 @@ public static class GoldProviderExtensions
     {
         GoldProvider.ZheShang => "浙商积存金",
         GoldProvider.MinSheng => "民生积存金",
+        GoldProvider.GongShang => "工商积存金",
         _ => "积存金",
     };
 
@@ -21,6 +23,7 @@ public static class GoldProviderExtensions
     {
         GoldProvider.ZheShang => "浙商",
         GoldProvider.MinSheng => "民生",
+        GoldProvider.GongShang => "工银",
         _ => "积存金",
     };
 
@@ -28,6 +31,7 @@ public static class GoldProviderExtensions
     {
         GoldProvider.ZheShang => new("https://api.jdjygold.com/gw2/generic/produTools/h5/m/getGoldPrice?goldCode=CZB-JCJ"),
         GoldProvider.MinSheng => new("https://ms.jr.jd.com/gw2/generic/CreatorSer/newh5/m/getFirstRelatedProductInfo?reqData=%7B%22circleId%22%3A%2213245%22%2C%22invokeSource%22%3A5%2C%22productId%22%3A%2221001001000001%22%7D"),
+        GoldProvider.GongShang => new("https://api.jdjygold.com/gw2/generic/produTools/h5/m/getGoldPrice?goldCode=ICBC-JCJ"),
         _ => throw new ArgumentOutOfRangeException(nameof(provider)),
     };
 }
@@ -71,6 +75,7 @@ public sealed record MarketData(
 public sealed record AppSnapshot(
     GoldProvider Provider,
     PriceInfo Price,
+    PriceTrendBasis Trend,
     MarketData Market,
     DateTimeOffset? LastUpdated,
     int RefreshIntervalSeconds,
@@ -106,9 +111,27 @@ public sealed class AppSettings
     public string? CharacterMonitor { get; set; }
     public bool CharacterDocked { get; set; }
     public DockEdge CharacterDockEdge { get; set; } = DockEdge.Right;
+    public Dictionary<GoldProvider, double> CostPrices { get; set; } = new();
+    public bool PromptCostPriceOnStartup { get; set; } = true;
+
+    /// <summary>返回指定来源已设定的成本价；未设定或数值无效时返回 null。</summary>
+    public double? CostPriceFor(GoldProvider provider)
+    {
+        if (CostPrices is null || !CostPrices.TryGetValue(provider, out var cost))
+        {
+            return null;
+        }
+
+        return double.IsFinite(cost) && cost > 0 ? cost : null;
+    }
 
     public void Normalize()
     {
+        if (!Enum.IsDefined(Provider))
+        {
+            Provider = GoldProvider.ZheShang;
+        }
+
         if (RefreshIntervalSeconds is not (1 or 2 or 5 or 10))
         {
             RefreshIntervalSeconds = 1;
@@ -127,6 +150,26 @@ public sealed class AppSettings
         if (LowThreshold is double low && (!double.IsFinite(low) || low <= 0))
         {
             LowThreshold = null;
+        }
+
+        // JsonSerializer 可能把 "CostPrices": null 反序列化成 null，这里修复并剔除无效成本价。
+        CostPrices ??= new Dictionary<GoldProvider, double>();
+        List<GoldProvider>? invalidCosts = null;
+        foreach (var pair in CostPrices)
+        {
+            if (!double.IsFinite(pair.Value) || pair.Value <= 0)
+            {
+                invalidCosts ??= [];
+                invalidCosts.Add(pair.Key);
+            }
+        }
+
+        if (invalidCosts is not null)
+        {
+            foreach (var provider in invalidCosts)
+            {
+                CostPrices.Remove(provider);
+            }
         }
     }
 }

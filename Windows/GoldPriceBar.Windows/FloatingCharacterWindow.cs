@@ -33,6 +33,13 @@ internal sealed class FloatingCharacterWindow : Window, IDisposable
     private readonly SpeechBubbleWindow speechBubble = new();
     private readonly ClickSequence clickSequence = new();
     private readonly Image characterImage = new() { Stretch = Stretch.Fill };
+    private readonly TextBlock sourceLabel = new()
+    {
+        FontFamily = new FontFamily("Segoe UI"),
+        FontWeight = FontWeights.SemiBold,
+        TextAlignment = TextAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+    };
     private readonly TextBlock priceLabel = new()
     {
         FontFamily = new FontFamily("Cascadia Mono, Consolas"),
@@ -82,7 +89,8 @@ internal sealed class FloatingCharacterWindow : Window, IDisposable
     private double dragStartTop;
     private double maximumDragDistance;
     private string price = "0.00";
-    private bool? isNegative;
+    private string source = string.Empty;
+    private PriceTrendBasis trendBasis = PriceTrendBasis.Neutral;
 
     internal FloatingCharacterWindow(AppSettings settings)
     {
@@ -109,6 +117,7 @@ internal sealed class FloatingCharacterWindow : Window, IDisposable
         ambientGrid.RenderTransform = TransformGroup(ambientScale, ambientRotate, ambientTranslate);
         actionGrid.RenderTransform = TransformGroup(actionScale, actionRotate, actionTranslate);
         actionGrid.Children.Add(characterImage);
+        priceCanvas.Children.Add(sourceLabel);
         priceCanvas.Children.Add(priceLabel);
         actionGrid.Children.Add(priceCanvas);
         ambientGrid.Children.Add(actionGrid);
@@ -162,6 +171,9 @@ internal sealed class FloatingCharacterWindow : Window, IDisposable
 
     internal event Action<CharacterPlacement>? PlacementChanged;
 
+    /// <summary>单击时请求切换数据源，返回要显示的气泡文案；返回 null 时使用默认单击台词。</summary>
+    internal event Func<string?>? SingleClickRequested;
+
     internal void SetCharacterVisible(bool visible)
     {
         characterVisible = visible;
@@ -200,13 +212,16 @@ internal sealed class FloatingCharacterWindow : Window, IDisposable
         PersistPlacement();
     }
 
-    internal void UpdateQuote(string formattedPrice, bool? negative)
+    internal void UpdateQuote(string formattedPrice, PriceTrendBasis trend, string sourceLabel)
     {
         price = formattedPrice;
-        isNegative = negative;
+        trendBasis = trend;
+        source = sourceLabel;
         priceLabel.Text = price;
-        priceLabel.Foreground = UiStyles.TrendBrush(negative);
-        var nextEmotion = negative == true ? CharacterEmotion.Sad : CharacterEmotion.Happy;
+        priceLabel.Foreground = UiStyles.TrendBrush(trendBasis);
+        this.sourceLabel.Text = source;
+        this.sourceLabel.Foreground = UiStyles.TrendBrush(trendBasis);
+        var nextEmotion = trendBasis == PriceTrendBasis.Fall ? CharacterEmotion.Sad : CharacterEmotion.Happy;
         if (nextEmotion != emotion)
         {
             emotion = nextEmotion;
@@ -493,6 +508,7 @@ internal sealed class FloatingCharacterWindow : Window, IDisposable
 
     private void PerformClick(ClickReaction reaction)
     {
+        var announcement = reaction == ClickReaction.PendingSingle ? SingleClickRequested?.Invoke() : null;
         var targetPose = reaction switch
         {
             ClickReaction.PendingSingle => RandomAction(emotion),
@@ -526,7 +542,14 @@ internal sealed class FloatingCharacterWindow : Window, IDisposable
         {
             PlayAction(targetPose, reaction == ClickReaction.Hide ? ClickSequence.HideDuration : ActionDuration);
         }
-        ShowSpeech(speech);
+        if (!string.IsNullOrEmpty(announcement))
+        {
+            ShowSpeechText(announcement);
+        }
+        else
+        {
+            ShowSpeech(speech);
+        }
     }
 
     private void HandleMouseDown(object sender, MouseButtonEventArgs e)
@@ -908,21 +931,30 @@ internal sealed class FloatingCharacterWindow : Window, IDisposable
         var top = normalized.Top * ActualHeight + 4;
         var width = Math.Max(1, normalized.Width * ActualWidth - 10);
         var height = Math.Max(1, normalized.Height * ActualHeight - 8);
+        var labelHeight = Math.Max(1, height * 0.32);
+        var priceHeight = Math.Max(1, height - labelHeight);
+        sourceLabel.Text = source;
+        sourceLabel.Foreground = UiStyles.TrendBrush(trendBasis);
+        sourceLabel.Width = width;
+        sourceLabel.Height = labelHeight;
+        sourceLabel.FontSize = FitFont(sourceLabel, source, width, labelHeight);
+        Canvas.SetLeft(sourceLabel, left);
+        Canvas.SetTop(sourceLabel, top);
         priceLabel.Text = price;
-        priceLabel.Foreground = UiStyles.TrendBrush(isNegative);
+        priceLabel.Foreground = UiStyles.TrendBrush(trendBasis);
         priceLabel.Width = width;
-        priceLabel.Height = height;
-        priceLabel.FontSize = FitFont(price, width, height);
+        priceLabel.Height = priceHeight;
+        priceLabel.FontSize = FitFont(priceLabel, price, width, priceHeight);
         Canvas.SetLeft(priceLabel, left);
-        Canvas.SetTop(priceLabel, top);
+        Canvas.SetTop(priceLabel, top + labelHeight);
     }
 
-    private double FitFont(string text, double width, double height)
+    private double FitFont(TextBlock label, string text, double width, double height)
     {
         var dpi = IsLoaded ? NativeMethods.Dpi(this).PixelsPerDip : 1;
         var low = 8d;
         var high = Math.Min(40, height * 0.9);
-        var typeface = new Typeface(priceLabel.FontFamily, FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
+        var typeface = new Typeface(label.FontFamily, FontStyles.Normal, label.FontWeight, FontStretches.Normal);
         for (var index = 0; index < 12; index++)
         {
             var middle = (low + high) / 2;
@@ -943,6 +975,12 @@ internal sealed class FloatingCharacterWindow : Window, IDisposable
             SpeechCatalog.Text(kind, emotion, delta),
             this,
             persistent ? null : duration ?? SpeechDuration);
+    }
+
+    private void ShowSpeechText(string text)
+    {
+        if (!characterVisible) return;
+        speechBubble.ShowBubble(text, this, SpeechDuration);
     }
 
     private void ClampToCurrentScreen()

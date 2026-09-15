@@ -85,7 +85,7 @@ internal sealed class HoverPanelWindow : Window
         providerLabel.Text = snapshot.Provider.DisplayName();
         priceLabel.Text = "¥ " + snapshot.FormattedPrice;
         changeLabel.Text = $"{snapshot.Price.ChangeAmount}  {snapshot.Price.ChangePercent}";
-        changeLabel.Foreground = UiStyles.TrendBrush(snapshot.Price.IsNegative);
+        changeLabel.Foreground = UiStyles.TrendBrush(snapshot.Trend);
 
         SetQuote("london", snapshot.Market.LondonGold);
         SetQuote("goldTd", snapshot.Market.GoldTD);

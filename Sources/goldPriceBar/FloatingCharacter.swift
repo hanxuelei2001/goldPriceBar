@@ -11,31 +11,6 @@ enum FloatingCharacterEmotion: Equatable {
     }
 }
 
-enum FloatingCharacterPriceTrend: Equatable {
-    case up
-    case down
-    case flat
-
-    init(isNegative: Bool?) {
-        switch isNegative {
-        case true: self = .down
-        case false: self = .up
-        case nil: self = .flat
-        }
-    }
-
-    var color: NSColor {
-        switch self {
-        case .up:
-            return NSColor(calibratedRed: 0.95, green: 0.25, blue: 0.22, alpha: 1)
-        case .down:
-            return NSColor(calibratedRed: 0.2, green: 0.78, blue: 0.35, alpha: 1)
-        case .flat:
-            return .secondaryLabelColor
-        }
-    }
-}
-
 enum FloatingCharacterSizeOption: Double, CaseIterable {
     case small = 220
     case standard = 240
@@ -294,6 +269,7 @@ enum FloatingCharacterSpeechTrigger: Equatable {
     case rapidFall(delta: Double)
     case sleeping
     case wake
+    case switchedSource(name: String)
 }
 
 struct FloatingCharacterSpeechCatalog {
@@ -335,6 +311,8 @@ struct FloatingCharacterSpeechCatalog {
             return "Zzz…"
         case .wake:
             return "醒啦，继续盯盘！"
+        case let .switchedSource(name):
+            return "换到\(name)啦～"
         }
     }
 }
@@ -578,6 +556,9 @@ final class FloatingCharacterController: NSObject {
     private(set) var presentationMode: FloatingCharacterPresentationMode = .full
     var panelSize: NSSize { panel.frame.size }
 
+    /// 单击看板娘时回调，用于切换数据源；返回非空文本时用它作为气泡内容。
+    var onSingleClick: (() -> String?)?
+
     nonisolated(unsafe) private var actionTimer: Timer?
     nonisolated(unsafe) private var ambientActionTimer: Timer?
     nonisolated(unsafe) private var dockedBlinkScheduleTimer: Timer?
@@ -745,10 +726,20 @@ final class FloatingCharacterController: NSObject {
         }
     }
 
-    func update(price: String, numericPrice: Double, isNegative: Bool?) {
-        let nextEmotion = FloatingCharacterEmotion(isNegative: isNegative)
+    func update(
+        price: String,
+        numericPrice: Double,
+        isNegative: Bool?,
+        costPrice: Double? = nil,
+        sourceLabel: String? = nil
+    ) {
+        let trend = GoldPriceTrend(price: numericPrice, costPrice: costPrice, isNegative: isNegative)
+        let nextEmotion = trend.emotion
         characterView.price = price
-        characterView.priceTrend = FloatingCharacterPriceTrend(isNegative: isNegative)
+        characterView.priceTrend = trend
+        if let sourceLabel {
+            characterView.sourceLabel = sourceLabel
+        }
 
         if nextEmotion != emotion {
             emotion = nextEmotion
@@ -859,7 +850,12 @@ final class FloatingCharacterController: NSObject {
         switch reaction {
         case .pendingSingle:
             pose = nil
-            speech = .click
+            // 先切换数据源，再按新数据源的情绪播放动作与气泡。
+            if let sourceName = onSingleClick?() {
+                speech = .switchedSource(name: sourceName)
+            } else {
+                speech = .click
+            }
             duration = FloatingCharacterActionTiming.actionDuration
             dockedBlinkCount = 2
         case .doubleClick:
@@ -1853,7 +1849,12 @@ final class FloatingCharacterView: NSView {
         didSet { needsDisplay = true }
     }
 
-    var priceTrend: FloatingCharacterPriceTrend = .flat {
+    /// 牌子上方的数据源简称，例如「浙商」「民生」「工银」。
+    var sourceLabel: String = "" {
+        didSet { needsDisplay = true }
+    }
+
+    var priceTrend: GoldPriceTrend = .neutral {
         didSet { needsDisplay = true }
     }
 
@@ -2182,28 +2183,82 @@ final class FloatingCharacterView: NSView {
         let signRect = Self.signRect(in: bounds, normalized: normalizedSignRect).insetBy(dx: 5, dy: 4)
         guard signRect.width > 0, signRect.height > 0 else { return }
 
-        let fontSize = Self.fittedFontSize(for: price, in: signRect.size)
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.white.withAlphaComponent(0.75)
         shadow.shadowBlurRadius = 1
         shadow.shadowOffset = NSSize(width: 0, height: -1)
 
+        // 牌子上方显示数据源简称，下方显示价格；未设置简称时价格占满整块牌子。
+        var priceRect = signRect
+        let label = sourceLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !label.isEmpty {
+            let gap: CGFloat = 1
+            let labelHeight = max(7, signRect.height * 0.34)
+            let labelRect = NSRect(
+                x: signRect.minX,
+                y: signRect.maxY - labelHeight,
+                width: signRect.width,
+                height: labelHeight
+            )
+            priceRect = NSRect(
+                x: signRect.minX,
+                y: signRect.minY,
+                width: signRect.width,
+                height: max(1, signRect.height - labelHeight - gap)
+            )
+            drawSignText(
+                label,
+                in: labelRect,
+                color: priceTrend.color.withAlphaComponent(0.85),
+                weight: .semibold,
+                monospacedDigits: false,
+                shadow: shadow
+            )
+        }
+
+        drawSignText(
+            price,
+            in: priceRect,
+            color: priceTrend.color,
+            weight: .bold,
+            monospacedDigits: true,
+            shadow: shadow
+        )
+    }
+
+    private func drawSignText(
+        _ text: String,
+        in rect: NSRect,
+        color: NSColor,
+        weight: NSFont.Weight,
+        monospacedDigits: Bool,
+        shadow: NSShadow
+    ) {
+        guard !text.isEmpty, rect.width > 0, rect.height > 0 else { return }
+
+        let fontSize = Self.fittedFontSize(
+            for: text,
+            in: rect.size,
+            weight: weight,
+            monospacedDigits: monospacedDigits
+        )
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .bold),
-            .foregroundColor: priceTrend.color,
+            .font: Self.signFont(size: fontSize, weight: weight, monospacedDigits: monospacedDigits),
+            .foregroundColor: color,
             .shadow: shadow,
         ]
-        let attributed = NSAttributedString(string: price, attributes: attributes)
+
+        let attributed = NSAttributedString(string: text, attributes: attributes)
         let measured = attributed.size()
         let drawRect = NSRect(
-            x: signRect.midX - measured.width / 2,
-            y: signRect.midY - measured.height / 2,
+            x: rect.midX - measured.width / 2,
+            y: rect.midY - measured.height / 2,
             width: measured.width,
             height: measured.height
         )
 
         NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: signRect).addClip()
+        NSBezierPath(rect: rect).addClip()
         attributed.draw(in: drawRect)
         NSGraphicsContext.restoreGraphicsState()
     }
@@ -2217,14 +2272,19 @@ final class FloatingCharacterView: NSView {
         )
     }
 
-    static func fittedFontSize(for text: String, in availableSize: NSSize) -> CGFloat {
+    static func fittedFontSize(
+        for text: String,
+        in availableSize: NSSize,
+        weight: NSFont.Weight = .bold,
+        monospacedDigits: Bool = true
+    ) -> CGFloat {
         guard !text.isEmpty, availableSize.width > 0, availableSize.height > 0 else { return 1 }
 
         var lower: CGFloat = 1
         var upper: CGFloat = 48
         for _ in 0..<12 {
             let candidate = (lower + upper) / 2
-            let font = NSFont.monospacedDigitSystemFont(ofSize: candidate, weight: .bold)
+            let font = signFont(size: candidate, weight: weight, monospacedDigits: monospacedDigits)
             let measured = (text as NSString).size(withAttributes: [.font: font])
             if measured.width <= availableSize.width, measured.height <= availableSize.height {
                 lower = candidate
@@ -2233,6 +2293,12 @@ final class FloatingCharacterView: NSView {
             }
         }
         return max(1, floor(lower * 10) / 10)
+    }
+
+    static func signFont(size: CGFloat, weight: NSFont.Weight, monospacedDigits: Bool) -> NSFont {
+        monospacedDigits
+            ? NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight)
+            : NSFont.systemFont(ofSize: size, weight: weight)
     }
 
     static func loadImage(named name: String) -> NSImage? {

@@ -19,6 +19,95 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public void ParsesGongShangUsingSharedJdQuoteSchema()
+    {
+        // 取自工商积存金（ICBC-JCJ）真实响应结构
+        const string json = """
+            {"resultData":{"code":"0000","data":{"raisePercent":0.0043977,"uniqueCode":"ICBC-JCJ","raise":4.06,"name":"工商银行积存金","lastPrice":927.26,"preClose":923.2}},"resultCode":0}
+            """;
+        var result = GoldPriceService.ParseGongShang(json);
+        Assert.Equal(927.26, result.Price);
+        Assert.Equal("4.06", result.ChangeAmount);
+        Assert.Equal("0.43%", result.ChangePercent);
+        Assert.False(result.IsNegative);
+    }
+
+    [Fact]
+    public void GongShangAndZheShangShareParserButUseDistinctGoldCodes()
+    {
+        const string json = """
+            {"resultData":{"data":{"lastPrice":927.26,"raise":4.06,"raisePercent":0.0043977}}}
+            """;
+        Assert.Equal(GoldPriceService.ParseZheShang(json), GoldPriceService.ParseGongShang(json));
+
+        Assert.Contains("goldCode=ICBC-JCJ", GoldProvider.GongShang.Endpoint().Query);
+        Assert.Contains("goldCode=CZB-JCJ", GoldProvider.ZheShang.Endpoint().Query);
+        Assert.Equal("工商积存金", GoldProvider.GongShang.DisplayName());
+        Assert.Equal("工银", GoldProvider.GongShang.ShortName());
+    }
+
+    [Fact]
+    public void NormalizeFallsBackForUndefinedProvider()
+    {
+        var settings = new AppSettings { Provider = (GoldProvider)99 };
+        settings.Normalize();
+        Assert.Equal(GoldProvider.ZheShang, settings.Provider);
+    }
+
+    [Fact]
+    public void PriceTrendResolverPrefersCostPriceWhenSet()
+    {
+        Assert.Equal(PriceTrendBasis.Rise, PriceTrendResolver.Resolve(1000, 900, true));
+        Assert.Equal(PriceTrendBasis.Fall, PriceTrendResolver.Resolve(800, 900, false));
+        Assert.Equal(PriceTrendBasis.Neutral, PriceTrendResolver.Resolve(900, 900, true));
+    }
+
+    [Fact]
+    public void PriceTrendResolverFallsBackToQuoteDirectionWithoutUsableCost()
+    {
+        Assert.Equal(PriceTrendBasis.Fall, PriceTrendResolver.Resolve(1000, null, true));
+        Assert.Equal(PriceTrendBasis.Rise, PriceTrendResolver.Resolve(1000, null, false));
+        Assert.Equal(PriceTrendBasis.Neutral, PriceTrendResolver.Resolve(1000, null, null));
+
+        Assert.Equal(PriceTrendBasis.Fall, PriceTrendResolver.Resolve(1000, 0, true));
+        Assert.Equal(PriceTrendBasis.Rise, PriceTrendResolver.Resolve(1000, 0, false));
+        Assert.Equal(PriceTrendBasis.Neutral, PriceTrendResolver.Resolve(1000, 0, null));
+
+        Assert.Equal(PriceTrendBasis.Fall, PriceTrendResolver.Resolve(1000, double.NaN, true));
+        Assert.Equal(PriceTrendBasis.Rise, PriceTrendResolver.Resolve(1000, double.PositiveInfinity, false));
+        Assert.Equal(PriceTrendBasis.Neutral, PriceTrendResolver.Resolve(1000, double.NegativeInfinity, null));
+
+        Assert.Equal(PriceTrendBasis.Fall, PriceTrendResolver.Resolve(0, 900, true));
+        Assert.Equal(PriceTrendBasis.Rise, PriceTrendResolver.Resolve(-5, 900, false));
+        Assert.Equal(PriceTrendBasis.Neutral, PriceTrendResolver.Resolve(0, 900, null));
+    }
+
+    [Fact]
+    public void NormalizeDropsInvalidCostPricesAndRepairsNullDictionary()
+    {
+        var settings = new AppSettings
+        {
+            CostPrices = new Dictionary<GoldProvider, double>
+            {
+                [GoldProvider.ZheShang] = 900,
+                [GoldProvider.MinSheng] = 0,
+                [GoldProvider.GongShang] = double.NaN,
+            },
+        };
+        settings.Normalize();
+        Assert.Equal(900, settings.CostPriceFor(GoldProvider.ZheShang));
+        Assert.Null(settings.CostPriceFor(GoldProvider.MinSheng));
+        Assert.Null(settings.CostPriceFor(GoldProvider.GongShang));
+        Assert.Single(settings.CostPrices);
+
+        settings.CostPrices = null!;
+        settings.Normalize();
+        Assert.NotNull(settings.CostPrices);
+        Assert.Empty(settings.CostPrices);
+        Assert.Null(settings.CostPriceFor(GoldProvider.ZheShang));
+    }
+
+    [Fact]
     public void ParsesMinShengStrings()
     {
         const string json = """
@@ -152,6 +241,38 @@ public sealed class CoreTests
             var fallback = await store.LoadAsync();
             Assert.Equal(GoldProvider.ZheShang, fallback.Provider);
             Assert.Equal(1, fallback.RefreshIntervalSeconds);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task CostPricesRoundTripThroughSettingsStore()
+    {
+        var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var path = System.IO.Path.Combine(directory, "settings.json");
+        try
+        {
+            var store = new SettingsStore(path);
+            await store.SaveAsync(new AppSettings
+            {
+                CostPrices = new Dictionary<GoldProvider, double>
+                {
+                    [GoldProvider.ZheShang] = 912.5,
+                    [GoldProvider.GongShang] = 880,
+                },
+                PromptCostPriceOnStartup = false,
+            });
+            var json = await File.ReadAllTextAsync(path);
+            Assert.Contains("ZheShang", json);
+
+            var loaded = await store.LoadAsync();
+            Assert.Equal(912.5, loaded.CostPriceFor(GoldProvider.ZheShang));
+            Assert.Equal(880, loaded.CostPriceFor(GoldProvider.GongShang));
+            Assert.Null(loaded.CostPriceFor(GoldProvider.MinSheng));
+            Assert.False(loaded.PromptCostPriceOnStartup);
         }
         finally
         {

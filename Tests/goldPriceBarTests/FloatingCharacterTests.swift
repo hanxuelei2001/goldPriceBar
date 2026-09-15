@@ -455,9 +455,9 @@ final class FloatingCharacterTests: XCTestCase {
     }
 
     func testPriceTrendMatchesStatusBarSemantics() {
-        XCTAssertEqual(FloatingCharacterPriceTrend(isNegative: false), .up)
-        XCTAssertEqual(FloatingCharacterPriceTrend(isNegative: true), .down)
-        XCTAssertEqual(FloatingCharacterPriceTrend(isNegative: nil), .flat)
+        XCTAssertEqual(GoldPriceTrend(isNegative: false), .rise)
+        XCTAssertEqual(GoldPriceTrend(isNegative: true), .fall)
+        XCTAssertEqual(GoldPriceTrend(isNegative: nil), .neutral)
     }
 
     func testMotionPolicyPausesForIdleLowPowerAndInactiveSessions() {
