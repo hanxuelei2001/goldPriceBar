@@ -28,8 +28,12 @@ import java.util.Locale
  */
 object NotificationFactory {
 
-    const val CHANNEL_STATUS = "status_bar_price"
+    // 通知渠道的重要级别一旦创建就无法再改，所以从 LOW 提升到 DEFAULT 时换了新 ID，
+    // 保证老版本升级上来的用户也能真正生效（旧 ID 在 ensureChannels 里删除）。
+    const val CHANNEL_STATUS = "status_bar_price_v2"
     const val CHANNEL_ALERT = "price_alert"
+
+    private const val LEGACY_CHANNEL_STATUS = "status_bar_price"
 
     const val ID_STATUS = 1001
     const val ID_ALERT = 1002
@@ -40,10 +44,13 @@ object NotificationFactory {
     fun ensureChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
 
+        // IMPORTANCE_DEFAULT 而不是 LOW：LOW 会被系统（尤其 MIUI/HyperOS）归到
+        // 「静默通知 / 更多通知」，折叠起来的同时状态栏连小图标都不显示。
+        // 渠道本身不带声音与震动，所以提升到 DEFAULT 也不会打扰。
         val statusChannel = NotificationChannel(
             CHANNEL_STATUS,
             context.getString(R.string.channel_status_name),
-            NotificationManager.IMPORTANCE_LOW,
+            NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
             description = context.getString(R.string.channel_status_desc)
             setShowBadge(false)
@@ -63,6 +70,10 @@ object NotificationFactory {
         }
 
         manager.createNotificationChannels(listOf(statusChannel, alertChannel))
+
+        // 渠道创建后 importance 就改不了了，所以 1.0.3 之前用过 LOW 的旧渠道必须删掉，
+        // 否则升级上来的用户仍然停留在静默分组里。
+        manager.deleteNotificationChannel(LEGACY_CHANNEL_STATUS)
     }
 
     /** 常驻状态栏通知。 */
@@ -112,8 +123,10 @@ object NotificationFactory {
             .setOngoing(true)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
-            .setSilent(true)
             .setShowWhen(true)
+            // 不再用 setSilent(true)：那会把通知打成「静默」，MIUI/HyperOS 会折叠它
+            // 并且不在状态栏显示小图标。静音由渠道（无声音、无震动）保证。
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setWhen(if (state.lastUpdateAt > 0L) state.lastUpdateAt else System.currentTimeMillis())
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)

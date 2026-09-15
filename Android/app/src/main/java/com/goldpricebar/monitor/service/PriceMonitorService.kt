@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.goldpricebar.monitor.R
@@ -15,6 +16,8 @@ import com.goldpricebar.monitor.data.PriceRepository
 import com.goldpricebar.monitor.data.PriceTrend
 import com.goldpricebar.monitor.settings.PriceInput
 import com.goldpricebar.monitor.settings.SettingsStore
+import com.goldpricebar.monitor.ui.PriceOverlay
+import com.goldpricebar.monitor.ui.StatusBarPresentation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +47,7 @@ class PriceMonitorService : Service() {
     private val refreshSignal = Channel<Unit>(Channel.CONFLATED)
 
     private lateinit var settings: SettingsStore
+    private lateinit var overlay: PriceOverlay
 
     private var pollJob: Job? = null
 
@@ -56,6 +60,7 @@ class PriceMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         settings = SettingsStore.get(this)
+        overlay = PriceOverlay(this, settings)
         NotificationFactory.ensureChannels(this)
     }
 
@@ -83,6 +88,7 @@ class PriceMonitorService : Service() {
 
         PriceRepository.setMonitoring(true)
         ensurePolling()
+        syncOverlay()
 
         when (action) {
             ACTION_SET_PROVIDER, ACTION_RELOAD, ACTION_REFRESH_NOW -> refreshSignal.trySend(Unit)
@@ -93,8 +99,38 @@ class PriceMonitorService : Service() {
 
     override fun onDestroy() {
         PriceRepository.setMonitoring(false)
+        overlay.hide()
         scope.cancel()
         super.onDestroy()
+    }
+
+    // MARK: - Overlay
+
+    /** 悬浮条跟随设置与权限：开关关闭或没有「显示在其他应用上层」权限时保持隐藏。 */
+    private fun syncOverlay() {
+        if (!settings.overlayEnabled || !settings.monitorEnabled || !PriceOverlay.canDraw(this)) {
+            overlay.hide()
+            return
+        }
+        if (!overlay.isShowing) {
+            overlay.show()
+        }
+        overlay.applyStoredPosition()
+        refreshOverlayContent()
+    }
+
+    private fun refreshOverlayContent() {
+        if (!overlay.isShowing) return
+        val state = PriceRepository.current
+        // 悬浮条是独立元素、没有上下文，所以始终带上数据源简称。
+        overlay.update(
+            text = StatusBarPresentation.statusText(
+                price = state.priceInfo.price,
+                trend = state.trend,
+                providerShortName = state.provider.shortName,
+            ),
+            color = ContextCompat.getColor(this, StatusBarPresentation.colorRes(state.trend)),
+        )
     }
 
     // MARK: - Polling
@@ -111,7 +147,9 @@ class PriceMonitorService : Service() {
                 refreshOnce()
             } catch (cancellation: CancellationException) {
                 throw cancellation
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                // 只兜网络等运行时异常；不要静默吞掉，否则会掩盖真正的 bug。
+                Log.e(TAG, "刷新失败", error)
                 PriceRepository.setFetching(false)
                 PriceRepository.markRequestFailed()
             }
@@ -144,6 +182,7 @@ class PriceMonitorService : Service() {
         }
 
         updateStatusNotification()
+        refreshOverlayContent()
 
         if (!failed) {
             checkPriceAlerts(priceInfo.price)
@@ -247,6 +286,7 @@ class PriceMonitorService : Service() {
 
     private fun shutdown() {
         PriceRepository.setMonitoring(false)
+        overlay.hide()
         pollJob?.cancel()
         pollJob = null
         NotificationFactory.cancel(this, NotificationFactory.ID_STATUS)
@@ -255,6 +295,8 @@ class PriceMonitorService : Service() {
     }
 
     companion object {
+        private const val TAG = "PriceMonitorService"
+
         const val ACTION_START = "com.goldpricebar.monitor.action.START"
         const val ACTION_RELOAD = "com.goldpricebar.monitor.action.RELOAD"
         const val ACTION_SET_PROVIDER = "com.goldpricebar.monitor.action.SET_PROVIDER"

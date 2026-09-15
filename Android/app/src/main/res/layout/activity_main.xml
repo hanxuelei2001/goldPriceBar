@@ -431,11 +431,44 @@
 
                 <TextView style="@style/CardTitle" android:text="@string/section_status_bar" />
 
+                <!-- 顶部悬浮价格条：状态栏本身不允许第三方写文字，只能贴一条悬浮条 -->
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_overlay"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/switch_overlay"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/text_overlay_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/switch_overlay_desc"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_overlay_reset"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:insetLeft="0dp"
+                    android:insetRight="0dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="0dp"
+                    android:paddingEnd="10dp"
+                    android:text="@string/action_reset_position"
+                    android:textColor="@color/text_secondary"
+                    android:visibility="gone" />
+
                 <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/switch_monitor"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="10dp"
                     android:text="@string/switch_monitor"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp" />

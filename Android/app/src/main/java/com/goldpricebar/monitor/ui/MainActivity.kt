@@ -99,6 +99,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // 从「显示在其他应用上层」系统设置页返回时，权限可能刚被授予，
+        // 这里重新读一次并把状态同步给服务。
+        binding.switchOverlay.isChecked = settings.overlayEnabled
+        renderOverlayHint()
+        if (settings.overlayEnabled) {
+            PriceMonitorService.reload(this)
+        }
+    }
+
     override fun onStop() {
         PriceMonitorService.isUiVisible = false
         super.onStop()
@@ -159,6 +170,7 @@ class MainActivity : AppCompatActivity() {
         binding.switchAutostart.isChecked = settings.autoStartOnBoot
         binding.switchShowProvider.isChecked = settings.showProviderInStatusBar
         binding.switchPromptCost.isChecked = settings.promptCostPriceOnStartup
+        binding.switchOverlay.isChecked = settings.overlayEnabled
 
         binding.switchMonitor.setOnCheckedChangeListener { _, checked ->
             settings.monitorEnabled = checked
@@ -184,6 +196,49 @@ class MainActivity : AppCompatActivity() {
         binding.switchPromptCost.setOnCheckedChangeListener { _, checked ->
             settings.promptCostPriceOnStartup = checked
         }
+
+        binding.switchOverlay.setOnCheckedChangeListener { _, checked ->
+            settings.overlayEnabled = checked
+            if (checked && !PriceOverlay.canDraw(this)) {
+                requestOverlayPermission()
+            } else {
+                PriceMonitorService.reload(this)
+            }
+            renderOverlayHint()
+        }
+
+        renderOverlayHint()
+    }
+
+    /** 悬浮条的状态提示：关闭 / 缺权限 / 已就绪。 */
+    private fun renderOverlayHint() {
+        binding.buttonOverlayReset.visibility =
+            if (settings.overlayEnabled) View.VISIBLE else View.GONE
+        binding.textOverlayHint.text = when {
+            !settings.overlayEnabled -> getString(R.string.switch_overlay_desc)
+            !PriceOverlay.canDraw(this) -> getString(R.string.overlay_permission_denied)
+            else -> getString(R.string.overlay_ready)
+        }
+    }
+
+    private fun requestOverlayPermission() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.overlay_permission_title)
+            .setMessage(R.string.overlay_permission_message)
+            .setPositiveButton(R.string.action_grant) { _, _ ->
+                try {
+                    startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:$packageName"),
+                        ),
+                    )
+                } catch (_: ActivityNotFoundException) {
+                    Toast.makeText(this, R.string.overlay_permission_denied, Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton(R.string.action_cancel, null)
+            .show()
     }
 
     private fun bindActions() {
@@ -198,6 +253,12 @@ class MainActivity : AppCompatActivity() {
 
         binding.buttonNotificationSettings.setOnClickListener { openNotificationSettings() }
         binding.buttonBatteryWhitelist.setOnClickListener { requestBatteryWhitelist() }
+
+        binding.buttonOverlayReset.setOnClickListener {
+            settings.resetOverlayPosition()
+            PriceMonitorService.reload(this)
+            Toast.makeText(this, R.string.overlay_reset_done, Toast.LENGTH_SHORT).show()
+        }
 
         binding.buttonSetHighAlert.setOnClickListener { showPriceAlertDialog(isHigh = true) }
         binding.buttonSetLowAlert.setOnClickListener { showPriceAlertDialog(isHigh = false) }

@@ -56,6 +56,28 @@ class SettingsStore private constructor(context: Context) {
         get() = prefs.getBoolean(KEY_SHOW_PROVIDER, false)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_PROVIDER, value).apply()
 
+    /** 顶部悬浮价格条（需要「显示在其他应用上层」权限）。 */
+    var overlayEnabled: Boolean
+        get() = prefs.getBoolean(KEY_OVERLAY_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_OVERLAY_ENABLED, value).apply()
+
+    /** 悬浮条水平位置；[DEFAULT_OVERLAY_POSITION] 表示用默认位置（状态栏正下方靠左）。 */
+    var overlayX: Int
+        get() = prefs.getInt(KEY_OVERLAY_X, DEFAULT_OVERLAY_POSITION)
+        set(value) = prefs.edit().putInt(KEY_OVERLAY_X, value).apply()
+
+    /** 悬浮条垂直位置；[DEFAULT_OVERLAY_POSITION] 表示用默认位置。 */
+    var overlayY: Int
+        get() = prefs.getInt(KEY_OVERLAY_Y, DEFAULT_OVERLAY_POSITION)
+        set(value) = prefs.edit().putInt(KEY_OVERLAY_Y, value).apply()
+
+    fun resetOverlayPosition() {
+        prefs.edit()
+            .putInt(KEY_OVERLAY_X, DEFAULT_OVERLAY_POSITION)
+            .putInt(KEY_OVERLAY_Y, DEFAULT_OVERLAY_POSITION)
+            .apply()
+    }
+
     fun costPrice(provider: GoldProvider): Double? = readPrice(costKey(provider))
 
     fun setCostPrice(provider: GoldProvider, value: Double?) = writePrice(costKey(provider), value)
@@ -105,6 +127,12 @@ class SettingsStore private constructor(context: Context) {
         private const val KEY_AUTO_START = "auto_start_on_boot"
         private const val KEY_PROMPT_COST_PRICE = "prompt_cost_price_on_startup"
         private const val KEY_SHOW_PROVIDER = "show_provider_in_status_bar"
+        private const val KEY_OVERLAY_ENABLED = "overlay_enabled"
+        private const val KEY_OVERLAY_X = "overlay_x"
+        private const val KEY_OVERLAY_Y = "overlay_y"
+
+        /** 悬浮条位置的「未设置」哨兵值。 */
+        const val DEFAULT_OVERLAY_POSITION = -1
 
         /** 与桌面端一致的刷新频率档位。 */
         val REFRESH_OPTIONS = intArrayOf(1, 2, 5, 10)

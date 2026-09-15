@@ -44,7 +44,18 @@ else
         echo "⚠️  CI 环境未提供 ANDROID_KEYSTORE_PATH，release 包将回退为 debug 签名" >&2
         echo "    如需发布可覆盖安装的正式包，请配置 ANDROID_KEYSTORE_BASE64 等 Secrets" >&2
     else
-        echo "🔑 生成自签名密钥（仅用于本地安装）…"
+        # 这条路径要显眼：新密钥 = 新身份，老用户无法覆盖安装。
+        echo ""
+        echo "╔════════════════════════════════════════════════════════════════════╗"
+        echo "║  ⚠️  工程内没有签名密钥，已新建一把自签名密钥                      ║"
+        echo "║                                                                    ║"
+        echo "║  这是一把「新身份」：用它签出的 APK 无法覆盖安装此前的版本，      ║"
+        echo "║  用户必须先卸载旧版（会丢失已保存的设置）。                        ║"
+        echo "║                                                                    ║"
+        echo "║  Android/keystore/ 被 .gitignore 忽略，git clean -fdx 会删掉它，   ║"
+        echo "║  请自行备份 goldpricebar.jks；正式发布建议改用 CI Secrets。        ║"
+        echo "╚════════════════════════════════════════════════════════════════════╝"
+        echo ""
         mkdir -p "$(dirname "${KEYSTORE}")"
         "${JAVA_HOME}/bin/keytool" -genkeypair \
             -keystore "${KEYSTORE}" \
@@ -52,7 +63,6 @@ else
             -keyalg RSA -keysize 2048 -validity 10950 \
             -storepass goldpricebar -keypass goldpricebar \
             -dname "CN=GoldPriceBar, OU=Personal, O=GoldPriceBar, L=Beijing, ST=Beijing, C=CN"
-        echo "✅ 密钥已生成"
     fi
 fi
 
@@ -90,10 +100,13 @@ echo "   大小：$(du -h "${DIST_DIR}/${APK_NAME}" | cut -f1)"
 echo ""
 
 # release 走到 debug 签名时明确提示，避免发布出去的包无法覆盖安装。
-SIGNER="$("${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/apksigner" verify --print-certs "${DIST_DIR}/${APK_NAME}" 2>/dev/null \
-    | sed -n 's/^Signer #1 certificate DN: //p' || true)"
+# 一并打印 SHA-256 指纹：指纹变了就说明换了密钥，用户必须先卸载旧版本。
+CERT_INFO="$("${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/apksigner" verify --print-certs "${DIST_DIR}/${APK_NAME}" 2>/dev/null || true)"
+SIGNER="$(printf '%s\n' "${CERT_INFO}" | sed -n 's/^Signer #1 certificate DN: //p')"
+FINGERPRINT="$(printf '%s\n' "${CERT_INFO}" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
 if [ -n "${SIGNER}" ]; then
     echo "🔏 签名者：${SIGNER}"
+    echo "   SHA-256：${FINGERPRINT}"
     case "${SIGNER}" in
         *Debug*|*debug*) echo "⚠️  当前使用 debug 签名，正式发布请配置 ANDROID_KEYSTORE_PATH" >&2 ;;
     esac

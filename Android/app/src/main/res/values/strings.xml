@@ -42,6 +42,17 @@
     <string name="switch_show_provider_desc">例如「浙商 ↑ 1049.59」，关闭则只显示「↑ 1049.59」</string>
     <string name="switch_prompt_cost">启动时提示设置成本价</string>
 
+    <!-- 顶部悬浮价格条 -->
+    <string name="switch_overlay">顶部悬浮价格条</string>
+    <string name="switch_overlay_desc">在状态栏正下方常驻显示「浙商 ↓ 928.47」，效果等同网速指示器；可拖动调整位置</string>
+    <string name="overlay_ready">悬浮价格条已开启，拖动可调整位置</string>
+    <string name="overlay_permission_title">需要「显示在其他应用上层」权限</string>
+    <string name="overlay_permission_message">Android 的状态栏由系统自己绘制，第三方 App 无法在上面写文字——你看到的那条网速是系统自带功能。\n\n要让「浙商 928.47」常驻在顶部，只能用一个悬浮条贴在状态栏正下方。请在接下来的设置页里允许「显示在其他应用上层」。</string>
+    <string name="overlay_permission_denied">未获得「显示在其他应用上层」权限，悬浮价格条暂时无法显示</string>
+    <string name="action_grant">去授权</string>
+    <string name="action_reset_position">重置位置</string>
+    <string name="overlay_reset_done">悬浮条位置已重置</string>
+
     <string name="label_update_time">更新于 %1$s</string>
     <string name="label_never_updated">尚未获取到行情</string>
     <string name="label_fetch_failed">请求失败，显示的是上一次成功的数据</string>
