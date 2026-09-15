@@ -106,6 +106,10 @@ jobs:
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      # runner 在海外，官方源比国内镜像快
+      GRADLE_CHINA_MIRRORS: "false"
+      GRADLE_MIRROR: "https://services.gradle.org/distributions"
+      ANDROID_SDK_MIRROR: "https://dl.google.com/android/repository"
     steps:
       - uses: actions/checkout@v4
 
@@ -114,11 +118,31 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-
-      # scripts/build-android.sh 见到组件齐全就不再下载，只走已经装好的这套
+      # 不用 android-actions/setup-android@v3：它 action.yml 里的 packages 默认值是
+      # "tools platform-tools"，而 tools 包已从 Google 的 SDK 仓库下线，sdkmanager 会
+      # 直接以 "Failed to find package 'tools'" 退出 1。runner 镜像本身已带 ANDROID_HOME
+      # 与 cmdline-tools，这里直接调用它补装组件即可。
+      # scripts/build-android.sh 见到组件齐全就不再下载，只走已经装好的这套。
       - name: Install SDK packages
-        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          sdkmanager="$(command -v sdkmanager || true)"
+          if [ -z "${sdkmanager}" ]; then
+            sdkmanager="$(ls -d "${sdk_root}"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1 || true)"
+          fi
+          if [ ! -x "${sdkmanager}" ]; then
+            echo "::error::未找到 sdkmanager（ANDROID_HOME=${sdk_root}）"
+            exit 1
+          fi
+          echo "sdkmanager: ${sdkmanager}"
+          # 未接受的许可会让 sdkmanager 卡在交互提示上，先静默全部接受
+          yes | "${sdkmanager}" --licenses > /dev/null 2>&1 || true
+          "${sdkmanager}" --install "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          if [ -z "${ANDROID_HOME:-}" ]; then
+            echo "ANDROID_HOME=${sdk_root}" >> "$GITHUB_ENV"
+            echo "ANDROID_SDK_ROOT=${sdk_root}" >> "$GITHUB_ENV"
+          fi
 
       - name: Cache Gradle dependencies
         uses: actions/cache@v4
@@ -140,16 +164,9 @@ jobs:
         run: echo "::warning::未配置 ANDROID_KEYSTORE_BASE64，APK 将回退为 debug 签名，用户无法用它覆盖安装历史版本"
 
       - name: Unit tests
-        env:
-          # runner 在海外，官方源比国内镜像快
-          GRADLE_CHINA_MIRRORS: "false"
-          GRADLE_MIRROR: "https://services.gradle.org/distributions"
         run: bash scripts/test-android.sh
 
       - name: Assemble release APK
-        env:
-          GRADLE_CHINA_MIRRORS: "false"
-          GRADLE_MIRROR: "https://services.gradle.org/distributions"
         run: bash scripts/build-android.sh release
 
       - name: List artifacts

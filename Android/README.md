@@ -113,8 +113,9 @@ dist/GoldPriceBar-Android-1.0.3-debug.apk    # debug
 海外环境（GitHub Actions）设 `GRADLE_CHINA_MIRRORS=false` 即可；CI 里还额外用
 `GRADLE_MIRROR=https://services.gradle.org/distributions` 从官方源取 Gradle。
 
-脚本是幂等的：`JAVA_HOME` / `ANDROID_HOME` 已由 CI 的 `setup-java`、`setup-android` 提供、
-且 SDK 组件齐全时，一个字节都不会重新下载（CI 只额外装一次 Gradle）。
+脚本是幂等的：`JAVA_HOME` 由 CI 的 `setup-java` 提供，`ANDROID_HOME` 用 ubuntu runner
+镜像预装的 SDK（workflow 里不再用 `android-actions/setup-android`，它的默认包列表含已下线的
+`tools` 包），且 SDK 组件齐全时，一个字节都不会重新下载（CI 只额外装一次 Gradle）。
 
 ### 用 Android Studio 打开
 

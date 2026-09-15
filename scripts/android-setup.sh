@@ -7,6 +7,8 @@
 #   .android-sdk/   Android SDK
 #   .gradle-home/   Gradle 依赖缓存
 #
+# 支持 macOS 与 Linux（GitHub Actions 的 ubuntu runner 跑的是同一套脚本）。
+#
 # 默认走腾讯 / 阿里云镜像（国内实测 ~11MB/s，dl.google.com 只有 ~40KB/s），
 # 可用环境变量覆盖：ANDROID_SDK_MIRROR、GRADLE_MIRROR、MAVEN_MIRROR。
 
@@ -27,10 +29,32 @@ GRADLE_MIRROR="${GRADLE_MIRROR:-https://mirrors.cloud.tencent.com/gradle}"
 SDK_MIRROR="${ANDROID_SDK_MIRROR:-https://mirrors.cloud.tencent.com/AndroidSDK}"
 SDK_FALLBACK_MIRROR="https://dl.google.com/android/repository"
 
-CMDLINE_TOOLS_ZIP="commandlinetools-mac-13114758_latest.zip"
+CMDLINE_TOOLS_VERSION="13114758"
+PLATFORM_TOOLS_VERSION="35.0.2"
+
+# SDK 压缩包按宿主系统取名：本机（macOS）与 GitHub Actions（Linux）都要能直接解压使用，
+# 拿错平台的 build-tools / platform-tools 会在构建时才炸。
+case "$(uname -s)" in
+    Darwin)
+        CMDLINE_TOOLS_OS="mac"
+        BUILD_TOOLS_OS="macosx"
+        PLATFORM_TOOLS_OS="darwin"
+        ;;
+    Linux)
+        CMDLINE_TOOLS_OS="linux"
+        BUILD_TOOLS_OS="linux"
+        PLATFORM_TOOLS_OS="linux"
+        ;;
+    *)
+        echo "❌ 不支持的构建平台：$(uname -s)（只提供 macOS / Linux 的 SDK 包直链）" >&2
+        exit 1
+        ;;
+esac
+
+CMDLINE_TOOLS_ZIP="commandlinetools-${CMDLINE_TOOLS_OS}-${CMDLINE_TOOLS_VERSION}_latest.zip"
 PLATFORM_ZIP="platform-${COMPILE_SDK}_r02.zip"
-BUILD_TOOLS_ZIP="build-tools_r${COMPILE_SDK}_macosx.zip"
-PLATFORM_TOOLS_ZIP="platform-tools_r35.0.2-darwin.zip"
+BUILD_TOOLS_ZIP="build-tools_r${COMPILE_SDK}_${BUILD_TOOLS_OS}.zip"
+PLATFORM_TOOLS_ZIP="platform-tools_r${PLATFORM_TOOLS_VERSION}-${PLATFORM_TOOLS_OS}.zip"
 
 # ── 基础工具 ────────────────────────────────────────────────────────────────
 # AGP 编译 Java 源码时要跑 jlink 生成 JDK image，因此 JDK 必须带 jmods，
@@ -90,8 +114,13 @@ android_setup_java() {
         done
     fi
 
-    # 4) 都没有就下载
+    # 4) 都没有就下载（只实现了 macOS 的自动下载，其它平台请自己提供 JAVA_HOME，
+    #    否则会装成 macOS 的 JDK）
     if [ -z "${home}" ]; then
+        if [ "$(uname -s)" != "Darwin" ]; then
+            echo "❌ 未找到可用的 JDK（需要带 jmods 的 JDK 17+），请设置 JAVA_HOME 后重试。" >&2
+            exit 1
+        fi
         android_download_jdk
         home="${TOOLING_DIR}/jdk-17"
     fi
