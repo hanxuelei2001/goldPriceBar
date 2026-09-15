@@ -8,3 +8,19 @@ DerivedData/
 **/bin/
 **/obj/
 dist/
+
+# Android
+.tooling/
+.android-sdk/
+.android-home/
+.gradle-home/
+Android/.gradle/
+Android/.kotlin/
+Android/local.properties
+Android/**/build/
+Android/keystore/
+*.apk
+*.aab
+*.keystore
+*.jks
+!Android/app/debug.keystore

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 红涨绿跌：与 macOS / Windows 版保持完全一致 -->
+    <color name="trend_rise">#F24038</color>
+    <color name="trend_fall">#33C759</color>
+    <color name="trend_neutral">#9AA0A6</color>
+
+    <color name="gold">#F5C542</color>
+    <color name="gold_dim">#8A6D1F</color>
+    <color name="gold_translucent">#33F5C542</color>
+
+    <color name="surface_dark">#101216</color>
+    <color name="surface_card">#1B1E25</color>
+    <color name="surface_card_stroke">#2B3038</color>
+    <color name="text_primary">#F2F3F5</color>
+    <color name="text_secondary">#9AA0A6</color>
+
+    <color name="chip_normal_bg">#1FFFFFFF</color>
+    <color name="chip_normal_stroke">#3DFFFFFF</color>
+
+    <color name="ic_launcher_background">#1B1D22</color>
+</resources>

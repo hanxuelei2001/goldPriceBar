@@ -1,8 +1,18 @@
 # GoldPriceBar
 
-macOS 状态栏与 Windows 任务栏黄金积存金实时价格监控应用。
+macOS 状态栏、Windows 任务栏与 Android 通知栏的黄金积存金实时价格监控应用。
 
 积存金数据来源于京东金融。https://gold-price-pro.pf.jd.com/
+
+三个平台的差异一览：
+
+| | macOS | Windows | Android |
+|---|---|---|---|
+| 显示位置 | 菜单栏 | 任务栏通知区域价格条 | 系统状态栏（常驻通知） |
+| 看板娘 | ✅ 桌面浮动人物 | ✅ 桌面浮动人物 | ❌ 不需要 |
+| 涨跌表达 | 红涨绿跌 | 红涨绿跌 | `↑`/`↓` 箭头 + 红涨绿跌 |
+| 安装包 | `GoldPriceBar-1.0.3.dmg` | 便携 ZIP | `GoldPriceBar-Android-1.0.3.apk` |
+
 
 ## 功能
 
@@ -82,10 +92,24 @@ macOS 状态栏与 Windows 任务栏黄金积存金实时价格监控应用。
 - 完整人物运行时图片为 512×512，贴边眨眼帧为 512×320，并使用 10MB 上限的按需缓存控制常驻内存
 - 显示状态、人物尺寸和拖动位置会在重启后恢复
 
+### Android 状态栏价格（无看板娘）
+
+- Android 版**不包含看板娘**，价格直接常驻在系统状态栏（前台服务 + 常驻通知）
+- 像网速指示器一样用「箭头 + 数字」表达：**红色 `↑` 表示赚了（高于成本价），绿色 `↓` 表示亏损（低于成本价）**，持平显示 `→`
+- **下拉通知栏即可切换数据源**：通知里直接放「浙商 / 民生 / 工银」三个胶囊按钮，另有三个标准通知动作按钮保底，适配会替换自定义布局的 ROM
+- 通知展开后显示数据源全称、大号价格、涨跌额与涨跌幅、更新时间与当前刷新频率
+- 数据源、刷新频率、成本价、高低价提醒、开机自启等设置与桌面端一致，并可持久化
+- 成本价为**每个数据源分别设置**，红绿基准同样以成本价优先、当日涨跌兜底
+- 高低价提醒在后台服务中判定，App 未打开也会触发；每次穿越阈值只提醒一次
+- 可选「开机自动启动」与「电池优化白名单」，重启手机后自动恢复监控
+- 网络抖动时保留上一次成功的价格并标记失败（桌面端会直接显示 `0.00`），避免状态栏闪成 0.00
+- 详见 [`Android/README.md`](Android/README.md)
+
 ## 系统要求
 
 - macOS：macOS 13.0 (Ventura) 及以上、Swift 6.2+
 - Windows：Windows 10 22H2 / Windows 11 x64；便携包已自包含 .NET 10，无需单独安装运行时
+- Android：Android 8.0 (API 26) 及以上；构建脚本会自动准备 JDK 17、Gradle 与 Android SDK
 
 ## 代码结构
 
@@ -103,16 +127,32 @@ goldPriceBar/
 ├── Artwork/FloatingCharacterActionSources/    # 新增动作的绿幕源图与透明母版
 ├── Artwork/FloatingCharacterDockedSources/    # 贴边人物生成源图与透明母版
 ├── Tests/goldPriceBarTests/                   # 浮动人物逻辑测试
+├── Android/                                   # Android 版（Kotlin，无看板娘）
+│   ├── settings.gradle.kts                    # Gradle 工程与国内镜像仓库
+│   ├── version.properties                     # 版本号唯一来源（同时决定 APK 文件名）
+│   ├── gradle/libs.versions.toml              # 版本目录
+│   └── app/src/
+│       ├── main/java/com/goldpricebar/monitor/
+│       │   ├── data/                          # 数据源、解析、红绿基准、StateFlow
+│       │   ├── settings/                      # SharedPreferences 持久化
+│       │   ├── service/                       # 前台服务 + 状态栏通知
+│       │   ├── receiver/                      # 开机自启
+│       │   └── ui/                            # 主界面与状态栏文案
+│       └── test/java/com/goldpricebar/        # JVM 单元测试
 ├── Windows/
 │   ├── GoldPriceBar.Core/                     # 跨 UI 的接口、解析、设置与行为策略
 │   ├── GoldPriceBar.Windows/                  # .NET 10 WPF Windows 客户端
 │   └── GoldPriceBar.Core.Tests/               # Windows 核心逻辑测试
 ├── scripts/
 │   ├── build-dmg.sh                           # DMG 打包脚本
-│   └── build-windows.ps1                      # Windows 便携包脚本
+│   ├── build-windows.ps1                      # Windows 便携包脚本
+│   ├── android-setup.sh                       # Android 工具链准备（被下面两个脚本 source）
+│   ├── build-android.sh                       # Android APK 构建脚本
+│   └── test-android.sh                        # Android 单元测试脚本
 └── dist/                                      # 打包产出目录
     ├── GoldPriceBar.app                       # macOS 应用包
-    └── GoldPriceBar-1.0.2.dmg                 # DMG 安装包
+    ├── GoldPriceBar-1.0.3.dmg                 # DMG 安装包
+    └── GoldPriceBar-Android-1.0.3.apk       # Android 安装包
 ```
 
 ## macOS 运行方式
@@ -159,14 +199,43 @@ dotnet run --project Windows/GoldPriceBar.Windows/GoldPriceBar.Windows.csproj
 
 产出文件为 `dist/GoldPriceBar-Windows-x64-1.0.3.zip`。GitHub Actions 中的 `Windows Build` 工作流也会自动测试并上传该产物。
 
+## Android 开发与发布
+
+一条命令即可完成工具链准备、单元测试与 APK 打包：
+
+```bash
+bash scripts/build-android.sh            # release APK（自签名，可直接安装）
+bash scripts/build-android.sh debug      # debug APK
+bash scripts/test-android.sh             # 只跑单元测试
+```
+
+产出文件为 `dist/GoldPriceBar-Android-1.0.3.apk`（版本号来自 `Android/version.properties`）。
+
+工具链全部安装在工程目录下的隐藏目录中（`.tooling` / `.android-sdk` / `.android-home` / `.gradle-home`，均已 gitignore），
+不会污染 `~/.gradle`、`~/Library/Android/sdk` 或 `~/.android`。
+默认走腾讯 / 阿里云镜像（实测约 10MB/s，官方源在本机只有约 40KB/s），可用 `ANDROID_SDK_MIRROR`、`GRADLE_MIRROR` 覆盖，
+海外环境用 `GRADLE_CHINA_MIRRORS=false` 关闭 Maven 镜像。
+
+用 Android Studio 直接打开 `Android/` 目录也可以；首次同步前在 `Android/local.properties` 写入 `sdk.dir=<你的 SDK 路径>`。
+
+### 三端发版
+
+macOS、Windows、Android 的版本号各自写在 `scripts/build-dmg.sh`、`Windows/Directory.Build.props`、
+`Android/version.properties`，打 `v*` tag 时 `.github/workflows/release.yml` 会并行构建
+DMG / 便携 ZIP / APK 并一起挂到 GitHub Release；文件名不含 tag 版本时会给出告警。
+
+日常提交与 PR 由 `Windows Build`、`Android Build` 两个工作流分别跑测试并上传产物。
+
 ## 技术实现
 
 | 模块 | 技术方案 |
 |------|----------|
 | macOS UI | AppKit（NSStatusBar + NSMenu） |
 | Windows UI | .NET 10 WPF + NotifyIcon |
-| 网络请求 | URLSession / HttpClient + async/await |
-| 数据解析 | JSONDecoder / System.Text.Json |
-| 通知提醒 | 双端自定义悬浮 Toast 窗口 |
-| 数据持久化 | UserDefaults / JSON 原子写入 |
-| 并发安全 | Swift Strict Concurrency / WPF Dispatcher |
+| Android UI | Kotlin + AppCompat/Material + RemoteViews 常驻通知 |
+| Android 后台 | 前台服务（`specialUse`）+ 协程轮询 + StateFlow |
+| 网络请求 | URLSession / HttpClient / HttpURLConnection + async-await / 协程 |
+| 数据解析 | JSONDecoder / System.Text.Json / org.json |
+| 通知提醒 | 桌面端自定义悬浮 Toast；Android 高优先级通知渠道 |
+| 数据持久化 | UserDefaults / JSON 原子写入 / SharedPreferences |
+| 并发安全 | Swift Strict Concurrency / WPF Dispatcher / Kotlin 协程 |

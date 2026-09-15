@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">金价状态栏</string>
+    <string name="app_subtitle">积存金实时行情 · 状态栏常驻</string>
+
+    <!-- 通知渠道 -->
+    <string name="channel_status_name">状态栏金价</string>
+    <string name="channel_status_desc">在系统状态栏常驻显示积存金实时价格与涨跌方向</string>
+    <string name="channel_alert_name">价格提醒</string>
+    <string name="channel_alert_desc">金价达到设定阈值时发出提醒</string>
+
+    <!-- 数据源 -->
+    <string name="provider_zhe_shang">浙商</string>
+    <string name="provider_min_sheng">民生</string>
+    <string name="provider_gong_shang">工银</string>
+    <string name="provider_zhe_shang_full">浙商积存金</string>
+    <string name="provider_min_sheng_full">民生积存金</string>
+    <string name="provider_gong_shang_full">工商积存金</string>
+
+    <!-- 通知 -->
+    <string name="notification_provider_pick">切换数据源</string>
+    <string name="notification_meta_format">更新于 %1$s · 每 %2$d 秒刷新</string>
+    <string name="notification_meta_failed">更新于 %1$s · 最近一次请求失败</string>
+    <string name="status_placeholder">↑ 0.00</string>
+
+    <!-- 卡片标题 -->
+    <string name="section_provider">数据源</string>
+    <string name="section_market">行情数据</string>
+    <string name="section_refresh">刷新频率</string>
+    <string name="section_cost">成本价</string>
+    <string name="section_alert">价格提醒</string>
+    <string name="section_status_bar">状态栏常驻</string>
+
+    <!-- 顶部状态卡片 -->
+    <string name="action_refresh_now">立即刷新</string>
+    <string name="action_battery_whitelist">电池优化白名单</string>
+    <string name="switch_monitor">状态栏常驻显示</string>
+    <string name="switch_monitor_desc">关闭后停止后台刷新并移除状态栏价格</string>
+    <string name="switch_autostart">开机自动启动</string>
+    <string name="switch_autostart_desc">重启手机后自动恢复状态栏监控</string>
+    <string name="switch_show_provider">状态栏显示数据源简称</string>
+    <string name="switch_show_provider_desc">例如「浙商 ↑ 1049.59」，关闭则只显示「↑ 1049.59」</string>
+    <string name="switch_prompt_cost">启动时提示设置成本价</string>
+
+    <string name="label_update_time">更新于 %1$s</string>
+    <string name="label_never_updated">尚未获取到行情</string>
+    <string name="label_fetch_failed">请求失败，显示的是上一次成功的数据</string>
+    <string name="label_monitoring_on">状态栏监控运行中</string>
+    <string name="label_monitoring_off">状态栏监控已停止</string>
+
+    <!-- 行情数据 -->
+    <string name="market_london_gold">伦敦金</string>
+    <string name="market_gold_td">黄金T+D</string>
+    <string name="market_converted">伦敦金换算 (¥/g)</string>
+    <string name="market_premium">溢价 (¥/g)</string>
+    <string name="market_usdcnh">离岸人民币</string>
+    <string name="market_dxy">美元指数</string>
+    <string name="market_waiting">行情数据加载中…</string>
+
+    <!-- 刷新频率 -->
+    <string name="refresh_1s">1 秒</string>
+    <string name="refresh_2s">2 秒</string>
+    <string name="refresh_5s">5 秒</string>
+    <string name="refresh_10s">10 秒</string>
+    <string name="refresh_hint">手机端建议 5 秒或更慢；1 秒刷新会更灵敏，但耗电与流量明显增加。</string>
+
+    <!-- 成本价 -->
+    <string name="cost_hint">为每个数据源单独设置买入成本价：高于成本价显示红色，低于成本价显示绿色。留空表示不设置。</string>
+    <string name="cost_hint_short">高于成本价显示红色，低于成本价显示绿色。</string>
+    <string name="cost_unset">未设置</string>
+    <string name="cost_dialog_title">设置成本价</string>
+    <string name="action_set">设置</string>
+    <string name="action_clear">清除</string>
+    <string name="action_ok">确定</string>
+    <string name="action_cancel">取消</string>
+
+    <!-- 价格提醒 -->
+    <string name="alert_high_label">高价提醒 (≥)</string>
+    <string name="alert_low_label">低价提醒 (≤)</string>
+    <string name="action_set_high_alert">设置高价提醒</string>
+    <string name="action_set_low_alert">设置低价提醒</string>
+    <string name="alert_high_dialog_title">设置高价提醒</string>
+    <string name="alert_high_dialog_message">当金价 ≥ 输入值时发送通知提醒</string>
+    <string name="alert_low_dialog_title">设置低价提醒</string>
+    <string name="alert_low_dialog_message">当金价 ≤ 输入值时发送通知提醒</string>
+    <string name="alert_input_hint">请输入价格，例如 880.50</string>
+    <string name="alert_clear_all">清除所有提醒</string>
+    <string name="alert_invalid_message">请输入有效的价格数字</string>
+    <string name="alert_triggered_high_title">📈 金价上涨提醒</string>
+    <string name="alert_triggered_low_title">📉 金价下跌提醒</string>
+    <string name="alert_triggered_body">%1$s 当前价格 %2$s，已达到 %3$s 的提醒条件</string>
+    <string name="alert_condition_high">≥ %1$s</string>
+    <string name="alert_condition_low">≤ %1$s</string>
+
+    <!-- 权限 -->
+    <string name="permission_notification_rationale">需要在通知栏常驻显示实时金价，请允许发送通知。若不允许，系统状态栏将无法显示价格。</string>
+    <string name="permission_notification_denied">通知权限被拒绝，状态栏无法显示金价。可点击「打开通知设置」手动开启。</string>
+    <string name="action_open_notification_settings">打开通知设置</string>
+    <string name="battery_whitelist_rationale">加入电池优化白名单后，锁屏时也能持续刷新金价。否则系统进入休眠后会暂停后台网络请求。</string>
+    <string name="battery_whitelist_unavailable">当前设备不支持直接申请，请在系统设置中手动允许后台运行。</string>
+    <string name="battery_whitelist_done">已在白名单中，锁屏后仍会持续刷新。</string>
+    <string name="battery_whitelist_title">后台运行</string>
+
+    <!-- 关于 -->
+    <string name="about_version">版本 %1$s</string>
+    <string name="about_note">数据来源于京东金融行情接口，仅供参考，不构成投资建议。</string>
+</resources>
